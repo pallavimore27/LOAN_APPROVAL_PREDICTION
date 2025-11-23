@@ -8,6 +8,21 @@ from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from src.hybrid_model import predict_proba_from_df
+from groq import Groq
+from chatbot import loan_chatbot_ui
+
+
+# ---------------------------------------------------
+# SESSION STATE VARIABLES
+# ---------------------------------------------------
+if "prediction_result" not in st.session_state:
+    st.session_state.prediction_result = None
+
+if "user_inputs" not in st.session_state:
+    st.session_state.user_inputs = None
+
+if "prediction_made" not in st.session_state:
+    st.session_state.prediction_made = False
 
 
 # ---------------------------------------------------
@@ -84,7 +99,6 @@ st.sidebar.markdown("<h2 class='sidebar-title'>📋 Applicant Details</h2>", uns
 st.sidebar.markdown("<hr style='margin-top:-10px; margin-bottom:5px;'>", unsafe_allow_html=True)
 st.sidebar.write("Provide your information below.")
 
-
 with st.sidebar.form("input_form"):
 
     st.subheader("Personal Information")
@@ -107,10 +121,8 @@ with st.sidebar.form("input_form"):
 
 
 # ---------------------------------------------------
-# PREDICTION
+# PREDICTION LOGIC (RUNS ONLY WHEN SUBMITTED)
 # ---------------------------------------------------
-pdf_buffer = None
-
 if submitted:
     total_income = applicant_income + coapplicant_income
 
@@ -135,6 +147,22 @@ if submitted:
     prob = float(predict_proba_from_df(df)[0])
     label = "Approved" if prob >= 0.5 else "Rejected"
 
+    st.session_state.prediction_result = 1 if label == "Approved" else 0
+    st.session_state.user_inputs = sample
+    st.session_state.prediction_made = True
+
+
+
+# ---------------------------------------------------
+# SHOW PREDICTION (ALWAYS PERSISTS)
+# ---------------------------------------------------
+if st.session_state.prediction_made:
+
+    sample = st.session_state.user_inputs
+    prediction_label = "Approved" if st.session_state.prediction_result == 1 else "Rejected"
+
+    df = pd.DataFrame([sample])
+    prob = float(predict_proba_from_df(df)[0])
 
     # ---------------- RESULT CARD ----------------
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -146,14 +174,12 @@ if submitted:
         st.metric("Approval Probability", f"{prob*100:.2f}%")
 
     with col2:
-        if label == "Approved":
+        if prediction_label == "Approved":
             st.success("💚 **Loan Status: APPROVED**")
         else:
             st.error("💔 **Loan Status: REJECTED**")
 
     st.markdown("</div>", unsafe_allow_html=True)
-
-
 
     # ---------------- INPUT DATA ----------------
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -161,9 +187,7 @@ if submitted:
     st.dataframe(df, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-
-
-    # ---------------- PDF GENERATION ----------------
+    # ---------------- PDF DOWNLOAD ----------------
     pdf_buffer = BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=letter)
     width, height = letter
@@ -174,7 +198,7 @@ if submitted:
     c.setFont("Helvetica", 12)
     y = height - 100
 
-    c.drawString(50, y, f"Prediction: {label}")
+    c.drawString(50, y, f"Prediction: {prediction_label}")
     c.drawString(50, y - 25, f"Approval Probability: {prob*100:.2f}%")
 
     y -= 70
@@ -193,11 +217,20 @@ if submitted:
     c.save()
     pdf_buffer.seek(0)
 
-
-    # ---------------- PDF DOWNLOAD ----------------
     st.download_button(
         label="📄 Download PDF Report",
         data=pdf_buffer,
         file_name="Loan_Prediction_Report.pdf",
         mime="application/pdf"
     )
+
+
+
+# ---------------------------------------------------
+# CHATBOT (ALWAYS VISIBLE + KNOWS THE RESULT)
+# ---------------------------------------------------
+prediction = st.session_state.prediction_result if st.session_state.prediction_made else None
+user_inputs = st.session_state.user_inputs if st.session_state.prediction_made else None
+
+st.markdown("<br><br>", unsafe_allow_html=True)
+loan_chatbot_ui(prediction_result=prediction, user_inputs=user_inputs)
